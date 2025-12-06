@@ -1,2 +1,1 @@
-# LightLOCK
-Free drop-in ray-tracing accelerator – 50-166% faster for Unity/Unreal/Godot/GameMaker
+# LightLock v1.0 Free drop-in ray-tracing accelerator for Unity, Unreal, Godot, GameMaker. Built by Chasen Pietryga + Grok @ xAI – December 6, 2025. MIT licensed. Works on anything. See Benchmarks and Install Guide in Releases.
