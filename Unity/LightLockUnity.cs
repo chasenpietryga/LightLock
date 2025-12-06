@@ -1,64 +1,110 @@
-// LightLockFinal_UnitySafe.cpp 
-#pragma once
-#include <cstdint>
-#include <unordered_map>
-#include <array>
-#include <string>
-#include <fstream>
-#include <mutex>
-#include <xxhash.h>                     // single-header, public domain
+using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.HighDefinition;
+using System.Runtime.InteropServices;
+using System.IO;
 
-struct LightPath { std::array<float,3> color; float weight; };
-struct AABB      { float min[3], max[3]; };
+// ================================================================
+// P/Invoke to our 112-line pruned C++ core
+// ================================================================
+public static class LightLockNative {
+    const string DLL = "LightLock";
+    [DllImport(DLL)] public static extern bool hit(uint hash, float[] color, ref float weight);
+    [DllImport(DLL)] public static extern void store(uint hash, float[] color, float weight, bool permanent);
+    [DllImport(DLL)] public static extern void miss_and_writeback(uint hash, float[] color, float weight);
+    [DllImport(DLL)] public static extern void invalidate_sector(ref Vector3 min, ref Vector3 max);
+    [DllImport(DLL)] public static extern void flush();
+}
 
-class LightLock final {
-private:
-    mutable std::mutex mtx;
-    std::unordered_map<uint64_t, LightPath>  st;   // 64-bit key now
-    std::unordered_map<uint64_t, std::pair<LightPath,uint8_t>> dyn;
+// ================================================================
+// One-component does everything – drop on any GameObject
+// ================================================================
+[ExecuteAlways]
+public class LightLockUnity : MonoBehaviour {
+    [Header("Auto-bake on play (editor & build)")]
+    public bool autoBakeStatic = true;
 
-    const size_t   st_max  = 2'097'152;
-    const size_t   dyn_max =   524'288;
-    const std::string path = "lightlock.bin";
+    static LightLockUnity instance;
 
-    static constexpr uint32_t MAGIC = 0x4C4C434B;
-    static constexpr uint32_t VER   = 3;           // bumped for 64-bit
-
-    void load() noexcept { /* identical logic, just uint64_t keys */ }
-    void save() const noexcept { /* identical logic */ }
-
-public:
-    LightLock()  { st.reserve(st_max); dyn.reserve(dyn_max); load(); }
-    ~LightLock() { std::lock_guard<std::mutex> l(mtx); save(); }
-
-    bool hit(uint64_t h, float* c, float* w) const noexcept {
-        std::lock_guard<std::mutex> l(mtx);
-        if (auto it=st.find(h); it!=st.end()) { std::copy(it->second.color.begin(),it->second.color.end(),c); *w=it->second.weight; return true; }
-        if (auto it=dyn.find(h); it!=dyn.end()) { std::copy(it->second.first.color.begin(),it->second.first.color.end(),c); *w=it->second.first.weight; return true; }
-        return false;
+    void Awake() {
+        if (instance == null) instance = this;
+        else if (instance != this) Destroy(this);
     }
 
-    void store(uint64_t h, const float* c, float w, bool permanent) noexcept {
-        std::lock_guard<std::mutex> l(mtx);
-        if (permanent) {
-            if (st.size()>=st_max) st.erase(st.begin());
-            st[h] = {{c[0],c[1],c[2]}, w};
+    // ----------------------------------------------------------------
+    // Public static API – call from your ray tracers / probes
+    // ----------------------------------------------------------------
+    public static bool Hit(uint hash, out Vector3 color, out float weight) {
+        color = Vector3.zero; weight = 0f;
+        float[] c = new float[3];
+        bool hit = LightLockNative.hit(hash, c, ref weight);
+        if (hit) color = new Vector3(c[0], c[1], c[2]);
+        return hit;
+    }
+
+    public static void Cache(uint hash, Vector3 color, float weight = 1f, bool permanent = false) {
+        float[] c = { color.x, color.y, color.z };
+        if (permanent)
+            LightLockNative.store(hash, c, weight, true);
+        else
+            LightLockNative.miss_and_writeback(hash, c, weight);
+    }
+
+    public static void InvalidateBox(Bounds bounds) {
+        Vector3 min = bounds.min;
+        Vector3 max = bounds.max;
+        LightLockNative.invalidate_sector(ref min, ref max);
+    }
+
+    // ----------------------------------------------------------------
+    // Automatic static baker – runs once per scene in editor & build
+    // ----------------------------------------------------------------
+#if UNITY_EDITOR
+    [UnityEditor.InitializeOnLoadMethod]
+    static void EditorInit() {
+        UnityEditor.EditorApplication.playModeStateChanged += state => {
+            if (state == UnityEditor.PlayModeStateChange.EnteredPlayMode && instance && instance.autoBakeStatic)
+                instance.BakeStaticScene();
+        };
+    }
+#endif
+
+    void BakeStaticScene() {
+        if (!autoBakeStatic) return;
+        Debug.Log("[LightLock] Baking static geometry...");
+        // Simple brute-force baker – replace with our full C++ baker later
+        foreach (var renderer in FindObjectsOfType<MeshRenderer>()) {
+            if (!renderer.gameObject.isStatic) continue;
+            var mesh = renderer.GetComponent<MeshFilter>().sharedMesh;
+            uint hash = (uint)mesh.GetInstanceID(); // good enough for static
+            Vector3 col = new Vector3(0.7f, 0.7f, 0.8f); // fake diffuse for demo
+            Cache(hash, col, 1f, permanent: true);
+        }
+        LightLockNative.flush();
+        Debug.Log($"[LightLock] Baked {FindObjectsOfType<MeshRenderer>(true).Length} static objects");
+    }
+}
+
+// ================================================================
+// Example usage in any ray-tracing shader or script
+// ================================================================
+public class ExampleRayProbe : MonoBehaviour {
+    uint GetHash() => (uint)System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(gameObject);
+
+    void Update() {
+        uint hash = GetHash();
+        if (LightLockUnity.Hit(hash, out Vector3 col, out float w)) {
+            // Cache hit – instant!
+            RenderSettings.ambientLight = col * w;
         } else {
-            if (dyn.size()>=dyn_max) dyn.erase(dyn.begin());
-            dyn[h] = {{{c[0],c[1],c[2]}, w}, 0};
+            // Cache miss – do expensive thing once
+            Vector3 realColor = ExpensiveTrace(); // your real ray/path tracer
+            LightLockUnity.Cache(hash, realColor, 1f, permanent: false);
         }
     }
 
-    void miss_and_writeback(uint64_t h, const float* c, float w) noexcept {
-        std::lock_guard<std::mutex> l(mtx);
-        if (dyn.size()>=dyn_max) dyn.erase(dyn.begin());
-        dyn[h] = {{{c[0],c[1],c[2]}, w}, 0};
+    Vector3 ExpensiveTrace() {
+        // Replace with RayTracingAccelerationStructure, HDProbe, etc.
+        return new Vector3(0.6f, 0.7f, 0.9f);
     }
-
-    void invalidate_sector(const float* min, const float* max) noexcept {
-        std::lock_guard<std::mutex> l(mtx);
-        dyn.clear();                                   // fast full flush
-    }
-
-    void flush() noexcept { std::lock_guard<std::mutex> l(mtx); save(); }
-};
+}
