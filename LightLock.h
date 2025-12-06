@@ -1,0 +1,1 @@
+#pragma once #include <cstdint> #include <vector> #include <string> extern C { bool hit(uint64_t hash, float color, float weight); void store(uint64_t hash, const float color, float weight, bool permanent = false); void invalidate_sector(const float min, const float max); void flush(); }
