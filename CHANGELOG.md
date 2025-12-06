@@ -1,0 +1,1 @@
+# LightLock Change Log ## v1.0 – December 6, 2025 - Initial release - Unity integration - Godot addon - GameMaker extension - Offline baker - Benchmarks included - Built by Chasen Pietryga + Grok @ xAI
