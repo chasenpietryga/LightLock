@@ -1,0 +1,10 @@
+Assets/
+├── Plugins/
+│   └── x64/
+│       └── LightLock.dll         
+│       └── LightLock.so          
+│       └── LightLock.bundle      
+├── Scripts/
+│   └── LightLockUnity.cs         
+└── LightLock/
+    └── lightlock.bin              
