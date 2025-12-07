@@ -1,0 +1,29 @@
+{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "1.0.0",
+    "FriendlyName": "LightLock",
+    "Description": "Revolutionary lighting cache system that reduces RAM usage by 70% and increases FPS by 2-3x",
+    "Category": "Rendering",
+    "CreatedBy": "Chasen Pietryga",
+    "CreatedByURL": "https://github.com/chasenpietryga/LightLock",
+    "DocsURL": "https://github.com/chasenpietryga/LightLock",
+    "MarketplaceURL": "",
+    "SupportURL": "https://github.com/chasenpietryga/LightLock/issues",
+    "CanContainContent": false,
+    "IsBetaVersion": false,
+    "IsExperimentalVersion": false,
+    "Installed": false,
+    "Modules": [
+        {
+            "Name": "LightLock",
+            "Type": "Runtime",
+            "LoadingPhase": "PreDefault",
+            "PlatformAllowList": [
+                "Win64",
+                "Linux",
+                "Mac"
+            ]
+        }
+    ]
+}
